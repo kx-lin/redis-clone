@@ -1,0 +1,18 @@
+# Binaries
+server
+client
+
+# Objects
+*.o
+
+# Debugging / Dumps
+core
+vgcore.*
+*.dSYM/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
