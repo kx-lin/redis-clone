@@ -1,9 +1,11 @@
 #include "utils.h"
+#include <cstdint>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
 #include <unistd.h>
-#include <assert.h>
+#include <fcntl.h>
 
 void die(const char* msg) {
   int err = errno;
@@ -13,6 +15,24 @@ void die(const char* msg) {
 
 void msg(const char* msg) {
   fprintf(stderr, "%s\n", msg);
+}
+
+void fd_set_nonblock(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  flags |= O_NONBLOCK;
+  fcntl(fd, F_SETFL, flags);
+
+  if (errno) {
+    die("fcntl() error");
+  }
+}
+
+void buf_append(std::vector<uint8_t>& buf, const uint8_t* data, size_t len) {
+  buf.insert(buf.end(), data, data + len);
+}
+
+void buf_consume(std::vector<uint8_t>& buf, size_t len) {
+  buf.erase(buf.begin(), buf.begin() + len);
 }
 
 int32_t read_all(int fd, char* buf, size_t n) {
