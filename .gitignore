@@ -16,3 +16,4 @@ vgcore.*
 
 # OS junk
 .DS_Store
+.clang-format

@@ -75,3 +75,36 @@ This milestone represents a major architectural shift from a "one-at-a-time" blo
     * **New Clients:** `accept()` them and add their state to the `fd2conn` map.
     * **Existing Clients:** Perform `read()` or `write()` operations and update their state based on the protocol.
 4.  **Cleanup:** Sweep through the connection list to remove any clients marked with `want_close` or those that encountered errors.
+
+## Milestone 4: Pipelining & High-Performance Buffering
+This milestone optimizes how the server handles the TCP byte stream and manages memory to achieve high-throughput request processing.
+
+### 1. Support for Pipelined Requests
+* **The Problem:** A naive server processes one request and then waits for the next event loop iteration. If a client sends 10 requests in a single packet, the remaining 9 sit idle in the kernel buffer until the next `poll()` cycle.
+* **The Solution:** Implemented a greedy execution loop: `while (try_one_request(conn)) {}`. The server now drains its input buffer entirely, processing every complete message available before returning to the event loop. This significantly reduces latency and syscall overhead.
+
+### 2. Revamped Buffer Architecture
+Replaced `std::vector<uint8_t>` with a custom pointer-based `Buffer` structure designed for networking efficiency.
+* **The Problem with Vector:** Removing data from the front (`erase`) requires an $O(N)$ shift of all remaining bytes. For large pipelined batches, this creates an $O(N^2)$ performance penalty.
+* **The Solution:** Used a sliding-window buffer with four pointers: `buffer_begin`, `data_begin`, `data_end`, and `buffer_end`.
+* **$O(1)$ Consuming:** "Removing" data is now just an $O(1)$ pointer increment of `data_begin`. No bytes are moved physically during consumption.
+* **Lazy Alignment:** We only shift data back to the front of the allocation (via `memmove`) when we actually run out of room for a new `append()`, effectively amortizing the cost of memory moves.
+
+
+
+### 3. Optimistic Non-Blocking Writes
+* **The Strategy:** In a request-response protocol, the socket is almost always ready for writing immediately after a request is read.
+* **The Optimization:** Instead of waiting for the next `poll()` iteration to send a response, we perform an "Optimistic Write" by calling `handle_write()` immediately after processing a request. 
+* **The Safety Net:** We check for `EAGAIN`. If the kernel buffer is full, we simply fall back to the event loop and wait for the `POLLOUT` flag as usual. This saves one full trip through the event loop in the majority of cases.
+
+### 4. Robust Memory Management
+* **RAII Patterns:** Utilized C++ Constructors and Destructors for the `Buffer` and `Conn` objects. 
+* **Auto-Cleanup:** By using `delete conn`, the buffers are automatically freed by their own destructors. This ensures that memory is handled safely even when connections are dropped due to errors or timeouts, eliminating the manual tracking required in raw C.
+
+### Summary of Performance Improvements
+| Feature | Milestone 3 | Milestone 4 |
+| :--- | :--- | :--- |
+| **Pipelining** | 1 msg per loop | **All** pending msgs per loop |
+| **Buffer Deletion** | $O(N)$ (Data shifting) | **$O(1)$** (Pointer increment) |
+| **Write Latency** | Waits for next loop | **Immediate** (Optimistic) |
+| **Memory Safety** | Manual `buf_init` | **Auto** via RAII |
