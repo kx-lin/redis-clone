@@ -108,3 +108,29 @@ Replaced `std::vector<uint8_t>` with a custom pointer-based `Buffer` structure d
 | **Buffer Deletion** | $O(N)$ (Data shifting) | **$O(1)$** (Pointer increment) |
 | **Write Latency** | Waits for next loop | **Immediate** (Optimistic) |
 | **Memory Safety** | Manual `buf_init` | **Auto** via RAII |
+
+## Milestone 5: Key-Value Store & Zero-Copy Protocol
+
+This stage transforms the server from an echo utility into a functional dictionary using `std::map` and a high-performance communication protocol.
+
+### 1. The Multi-String Protocol
+To handle commands with multiple arguments (like `SET key value`), the protocol was upgraded to a nested length-prefixed format.
+
+* **Request:** Starts with `nstr` (number of strings), followed by each string’s `len` and its raw data.
+* **Response:** Starts with a total length, followed by a 4-byte **Status Code** (e.g., `RES_OK`, `RES_NX` for Not Found, or `RES_ERR`), and then the result data (if applicable).
+
+### 2. Dictionary Logic via `std::map`
+The application logic now manages a global `std::map<std::string, std::string>` to persist data.
+
+* **GET:** Uses `.find()` to retrieve values. This is preferred over `[]` because it prevents the accidental creation of empty entries for missing keys.
+* **SET:** Implements an $O(1)$ optimization using `.swap()`. Instead of copying the string data into the map, the server swaps internal heap pointers between the request buffer and the database, making updates instantaneous regardless of string size.
+* **DEL:** Uses `.erase()` to remove keys from the store.
+
+
+
+### 3. Direct Buffer Writing & Placeholder Patching
+To eliminate unnecessary memory copies, the server writes directly to the `outgoing` buffer using a "placeholder and patch" technique.
+
+* **Length Placeholder:** Since the final size of the response is unknown until the command is processed, a 4-byte placeholder is appended to the buffer first.
+* **Direct Serialization:** The status code and data are appended directly to the buffer, avoiding an intermediate string or vector.
+* **Header Patching:** Once the payload is complete, the actual size is calculated and written back into the placeholder's memory location using `memcpy`. This "back-patching" allows for single-pass serialization with zero extra copies.
